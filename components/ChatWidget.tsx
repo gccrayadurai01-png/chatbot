@@ -229,6 +229,25 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
         const decoder = new TextDecoder();
         let buffer = "";
 
+        // Buffer the whole reply and reveal it in ONE shot when the turn ends —
+        // showing text token-by-token exposed the model's mid-thought edits and
+        // read as janky. The animated typing dots run until this is revealed.
+        let assistantText = "";
+        let pendingOptions: string[] | undefined;
+        let pendingOffer: { url: string; headline: string } | undefined;
+        let pendingMeeting: { url: string; length: string } | undefined;
+        let pendingRejected: { email: string } | undefined;
+
+        const reveal = () =>
+          patch((m) => ({
+            ...m,
+            content: assistantText || m.content,
+            options: pendingOptions ?? m.options,
+            offer: pendingOffer ?? m.offer,
+            meeting: pendingMeeting ?? m.meeting,
+            emailRejected: pendingRejected ?? m.emailRejected,
+          }));
+
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -251,14 +270,14 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
 
             switch (event.type) {
               case "text":
-                setStatus(null);
-                patch((m) => ({ ...m, content: m.content + event.value }));
+                // Accumulate only — do NOT paint yet; keep the typing dots up.
+                assistantText += event.value;
                 break;
               case "status":
                 setStatus(event.value);
                 break;
               case "options":
-                patch((m) => ({ ...m, options: event.options }));
+                pendingOptions = event.options;
                 break;
               case "email_prompt":
                 // If they've already given contact details up top, don't nag —
@@ -270,23 +289,34 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
                 }
                 break;
               case "offer":
-                patch((m) => ({ ...m, offer: { url: event.url, headline: event.headline } }));
+                pendingOffer = { url: event.url, headline: event.headline };
                 break;
               case "meeting":
-                patch((m) => ({ ...m, meeting: { url: event.url, length: event.length } }));
+                pendingMeeting = { url: event.url, length: event.length };
                 break;
               case "email_rejected":
-                patch((m) => ({ ...m, emailRejected: { email: event.email } }));
+                pendingRejected = { email: event.email };
                 break;
               case "error":
-                patch((m) => ({ ...m, content: m.content + event.value }));
+                // Reveal errors immediately so the visitor never stares at dots.
+                assistantText += event.value;
+                setStatus(null);
+                reveal();
                 break;
               case "email_captured":
+                break;
               case "done":
+                setStatus(null);
+                reveal();
                 break;
             }
           }
         }
+
+        // Safety net: reveal whatever we have if the stream ended without a
+        // "done" event.
+        setStatus(null);
+        reveal();
       } catch {
         patch((m) => ({
           ...m,
