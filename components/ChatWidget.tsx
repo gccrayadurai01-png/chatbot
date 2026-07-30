@@ -56,6 +56,13 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  // Latest messages, for building the stateless history sent with each request
+  // (the server keeps no session store — see /api/chat/message).
+  const messagesRef = useRef<Message[]>(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
   const visitorId = useRef<string | null>(null);
   if (visitorId.current === null && typeof window !== "undefined") {
     try {
@@ -114,6 +121,13 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
       const trimmed = text.trim();
       if (!trimmed || streaming || !sessionId) return;
 
+      // Snapshot the conversation so far (before this new turn) to send with the
+      // request — the server is stateless and relies on this history.
+      const priorHistory = messagesRef.current
+        .filter((m) => m.content && m.content.trim())
+        .map((m) => ({ role: m.role, content: m.content }));
+      while (priorHistory.length && priorHistory[0]!.role === "assistant") priorHistory.shift();
+
       setInput("");
       setPickedService(null); // Any real message retires the picker permanently.
       setMessages((prev) => [...prev, { id: nextId++, role: "user", content: trimmed }]);
@@ -130,7 +144,7 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
         fetch("/api/chat/message", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId: id, message: trimmed }),
+          body: JSON.stringify({ sessionId: id, message: trimmed, history: priorHistory }),
         });
 
       try {

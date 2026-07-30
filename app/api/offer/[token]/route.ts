@@ -17,7 +17,8 @@ export const runtime = "nodejs";
 export async function GET(_request: Request, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params;
 
-  if (!/^[a-f0-9]{32}$/.test(token)) {
+  // JWT: three base64url segments separated by dots (offers are stateless tokens).
+  if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)) {
     return new Response("Not found", { status: 404 });
   }
 

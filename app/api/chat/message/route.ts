@@ -1,5 +1,5 @@
 import { CHAT_MODEL, runAgent, type AgentEvent, type ChatTurn } from "@/lib/agent";
-import { addMessage, getHistory, logEvent, sessionExists } from "@/lib/store";
+import { addMessage, logEvent } from "@/lib/store";
 import { clientIp, rateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -34,13 +34,36 @@ export async function POST(request: Request) {
 
   let sessionId: string;
   let message: string;
+  let clientHistory: ChatTurn[] = [];
   try {
-    const body = (await request.json()) as { sessionId?: unknown; message?: unknown };
+    const body = (await request.json()) as {
+      sessionId?: unknown;
+      message?: unknown;
+      history?: unknown;
+    };
     if (typeof body.sessionId !== "string" || typeof body.message !== "string") {
       return Response.json({ error: "sessionId and message are required" }, { status: 400 });
     }
     sessionId = body.sessionId;
     message = body.message.trim();
+
+    // The conversation is STATELESS: the widget sends the prior turns with every
+    // message, so any serverless instance can answer without a shared session
+    // store. Sanitize hard — this is untrusted client input.
+    if (Array.isArray(body.history)) {
+      clientHistory = body.history
+        .filter(
+          (t): t is { role: "user" | "assistant"; content: string } =>
+            !!t &&
+            typeof t === "object" &&
+            ((t as { role?: unknown }).role === "user" ||
+              (t as { role?: unknown }).role === "assistant") &&
+            typeof (t as { content?: unknown }).content === "string" &&
+            (t as { content: string }).content.trim().length > 0,
+        )
+        .map((t) => ({ role: t.role, content: t.content.slice(0, MAX_MESSAGE_CHARS) }))
+        .slice(-HISTORY_TURNS);
+    }
   } catch {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
@@ -55,15 +78,15 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!(await sessionExists(sessionId))) {
-    return Response.json({ error: "Unknown or expired session" }, { status: 404 });
-  }
+  const combined: ChatTurn[] = [...clientHistory, { role: "user", content: message }];
+  // The model requires the first turn to be from the user.
+  while (combined.length > 1 && combined[0]!.role === "assistant") combined.shift();
+  const history = combined;
 
-  const previous = await getHistory(sessionId, HISTORY_TURNS);
-  const history: ChatTurn[] = [...previous, { role: "user", content: message }];
-
-  await addMessage(sessionId, { role: "user", content: message });
-  await logEvent(sessionId, "message_sent", { chars: message.length });
+  // Best-effort persistence for the admin dashboard when a database is present;
+  // never required for the reply, and harmless (per-instance) in memory mode.
+  await addMessage(sessionId, { role: "user", content: message }).catch(() => undefined);
+  await logEvent(sessionId, "message_sent", { chars: message.length }).catch(() => undefined);
 
   // Absolute base URL for the one-pager link the agent hands to the visitor.
   const origin = new URL(request.url).origin;
