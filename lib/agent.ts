@@ -540,6 +540,15 @@ export async function runAgent(
     }
 
     messages.push({ role: "user", content: results });
+
+    // `show_options` and `request_email` mean "I've asked — now wait for the
+    // visitor." They are TERMINAL: end the turn here instead of looping back for
+    // more text. This is what stops the agent from, e.g., offering the case study
+    // AND immediately demanding the email (and repeating itself) in one breath.
+    const waitsForVisitor = toolUses.some(
+      (t) => t.name === "show_options" || t.name === "request_email",
+    );
+    if (waitsForVisitor) break;
   }
 
   return { text: assistantText, inputTokens, outputTokens };

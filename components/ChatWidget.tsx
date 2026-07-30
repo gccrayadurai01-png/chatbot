@@ -99,16 +99,29 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(leadEmail.trim());
 
+  // Set true when the agent is waiting on contact details, so saving the top form
+  // auto-continues the conversation instead of the visitor having to type.
+  const awaitingContactRef = useRef(false);
+  // Latest send(), so saveLead (defined earlier) can call it.
+  const sendRef = useRef<((text: string) => void) | null>(null);
+
   const saveLead = useCallback(() => {
     if (!emailValid) return;
     const next = { name: leadName.trim(), email: leadEmail.trim() };
     setLead(next);
+    leadRef.current = next;
     setLeadEditing(false);
     setLeadPulse(false);
     try {
       localStorage.setItem("cloudsufi_lead", JSON.stringify(next));
     } catch {
       // ignore
+    }
+    // If the agent asked for it, nudge the conversation forward automatically.
+    if (awaitingContactRef.current) {
+      awaitingContactRef.current = false;
+      const who = next.name ? `${next.name} here` : "Here";
+      setTimeout(() => sendRef.current?.(`${who} — my details are in, go ahead.`), 0);
     }
   }, [emailValid, leadName, leadEmail]);
 
@@ -233,20 +246,27 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
         // showing text token-by-token exposed the model's mid-thought edits and
         // read as janky. The animated typing dots run until this is revealed.
         let assistantText = "";
+        let emailPromptFired = false;
         let pendingOptions: string[] | undefined;
         let pendingOffer: { url: string; headline: string } | undefined;
         let pendingMeeting: { url: string; length: string } | undefined;
         let pendingRejected: { email: string } | undefined;
 
-        const reveal = () =>
+        const reveal = () => {
+          // Guarantee a line when the agent silently asked for contact, so the
+          // visitor never gets a blank bubble next to the pulsing form.
+          const content =
+            assistantText ||
+            (emailPromptFired ? "Pop your name + work email up top and it's yours." : "");
           patch((m) => ({
             ...m,
-            content: assistantText || m.content,
+            content: content || m.content,
             options: pendingOptions ?? m.options,
             offer: pendingOffer ?? m.offer,
             meeting: pendingMeeting ?? m.meeting,
             emailRejected: pendingRejected ?? m.emailRejected,
           }));
+        };
 
         for (;;) {
           const { done, value } = await reader.read();
@@ -283,8 +303,10 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
                 // If they've already given contact details up top, don't nag —
                 // the agent shouldn't be asking, but ignore gracefully if it does.
                 if (!leadRef.current) {
+                  emailPromptFired = true;
                   setLeadEditing(true);
                   setLeadPulse(true);
+                  awaitingContactRef.current = true;
                   leadNameRef.current?.focus();
                 }
                 break;
@@ -330,6 +352,11 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
     },
     [sessionId, streaming, startSession],
   );
+
+  // Keep sendRef current so saveLead (declared earlier) can auto-continue.
+  useEffect(() => {
+    sendRef.current = (text: string) => void send(text);
+  }, [send]);
 
   /** One click, no retyping — the "I only have Gmail, let me continue" path. */
   const continueWithPersonalEmail = useCallback(
@@ -444,7 +471,7 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
                 <div className={`cs-bubble cs-bubble-${message.role}`}>{message.content}</div>
               )}
 
-              {!message.content && message.role === "assistant" && !message.offer && (
+              {!message.content && message.role === "assistant" && !message.offer && streaming && (
                 <div className="cs-bubble cs-bubble-assistant">
                   <TypingDots />
                 </div>
