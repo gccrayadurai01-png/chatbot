@@ -12,6 +12,8 @@ type Message = {
   content: string;
   /** Tappable choices the agent offered, rendered as buttons under the bubble. */
   options?: string[];
+  /** Set when the agent asked for contact — renders an inline name+email box. */
+  askContact?: boolean;
   /** Attached cards, rendered under the bubble. */
   offer?: { url: string; headline: string };
   meeting?: { url: string; length: string };
@@ -105,11 +107,14 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
   // Latest send(), so saveLead (defined earlier) can call it.
   const sendRef = useRef<((text: string) => void) | null>(null);
 
-  const saveLead = useCallback(() => {
-    if (!emailValid) return;
-    const next = { name: leadName.trim(), email: leadEmail.trim() };
+  // Persist a name+email (from either the top bar or the inline chat box) and,
+  // when the agent was waiting on it, auto-continue the conversation.
+  const applyLead = useCallback((name: string, email: string, autoContinue: boolean) => {
+    const next = { name: name.trim(), email: email.trim() };
     setLead(next);
     leadRef.current = next;
+    setLeadName(next.name);
+    setLeadEmail(next.email);
     setLeadEditing(false);
     setLeadPulse(false);
     try {
@@ -117,13 +122,20 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
     } catch {
       // ignore
     }
-    // If the agent asked for it, nudge the conversation forward automatically.
-    if (awaitingContactRef.current) {
-      awaitingContactRef.current = false;
+    // Retire any inline contact box now that we have the details.
+    setMessages((prev) => prev.map((m) => (m.askContact ? { ...m, askContact: false } : m)));
+    if (autoContinue) {
       const who = next.name ? `${next.name} here` : "Here";
       setTimeout(() => sendRef.current?.(`${who} — my details are in, go ahead.`), 0);
     }
-  }, [emailValid, leadName, leadEmail]);
+  }, []);
+
+  const saveLead = useCallback(() => {
+    if (!emailValid) return;
+    const shouldContinue = awaitingContactRef.current;
+    awaitingContactRef.current = false;
+    applyLead(leadName, leadEmail, shouldContinue);
+  }, [emailValid, leadName, leadEmail, applyLead]);
 
   const visitorId = useRef<string | null>(null);
   if (visitorId.current === null && typeof window !== "undefined") {
@@ -247,6 +259,7 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
         // read as janky. The animated typing dots run until this is revealed.
         let assistantText = "";
         let emailPromptFired = false;
+        let pendingAskContact = false;
         let pendingOptions: string[] | undefined;
         let pendingOffer: { url: string; headline: string } | undefined;
         let pendingMeeting: { url: string; length: string } | undefined;
@@ -257,11 +270,12 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
           // visitor never gets a blank bubble next to the pulsing form.
           const content =
             assistantText ||
-            (emailPromptFired ? "Pop your name + work email up top and it's yours." : "");
+            (emailPromptFired ? "Great — drop your name and work email just below." : "");
           patch((m) => ({
             ...m,
             content: content || m.content,
             options: pendingOptions ?? m.options,
+            askContact: pendingAskContact || m.askContact,
             offer: pendingOffer ?? m.offer,
             meeting: pendingMeeting ?? m.meeting,
             emailRejected: pendingRejected ?? m.emailRejected,
@@ -304,10 +318,9 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
                 // the agent shouldn't be asking, but ignore gracefully if it does.
                 if (!leadRef.current) {
                   emailPromptFired = true;
-                  setLeadEditing(true);
-                  setLeadPulse(true);
+                  pendingAskContact = true; // inline name+email box under this message
+                  setLeadPulse(true); // also nudge the top bar
                   awaitingContactRef.current = true;
-                  leadNameRef.current?.focus();
                 }
                 break;
               case "offer":
@@ -492,6 +505,10 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
                 </div>
               )}
 
+              {message.askContact && !lead && (
+                <ContactForm disabled={disabled} onSubmit={(n, e) => applyLead(n, e, true)} />
+              )}
+
               {message.emailRejected && (
                 <div className="cs-email-choice">
                   <button
@@ -639,6 +656,60 @@ function TypingDots() {
       <span />
       <span />
     </span>
+  );
+}
+
+/** Inline name + work-email box rendered right under the agent's message. */
+function ContactForm({
+  disabled,
+  onSubmit,
+}: {
+  disabled: boolean;
+  onSubmit: (name: string, email: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const nameRef = useRef<HTMLInputElement>(null);
+  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
+  useEffect(() => {
+    nameRef.current?.focus();
+  }, []);
+
+  return (
+    <form
+      className="cs-emailform"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (valid && !disabled) onSubmit(name, email);
+      }}
+    >
+      <input
+        ref={nameRef}
+        type="text"
+        className="cs-emailinput"
+        value={name}
+        placeholder="Your name"
+        autoComplete="given-name"
+        disabled={disabled}
+        onChange={(event) => setName(event.target.value)}
+      />
+      <div className="cs-emailrow">
+        <input
+          type="email"
+          className="cs-emailinput"
+          value={email}
+          placeholder="Work email"
+          autoComplete="email"
+          inputMode="email"
+          disabled={disabled}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+        <button type="submit" className="cs-emailsend" disabled={disabled || !valid}>
+          Send
+        </button>
+      </div>
+    </form>
   );
 }
 
