@@ -381,14 +381,17 @@ async function runTool(
         nextStep: typeof input.next_step === "string" ? input.next_step : "A short call to confirm fit.",
       });
 
-      const url = `${ctx.baseUrl}/api/offer/${token}`;
+      // Link to the viewer page (embeds the PDF) rather than the raw PDF, so it
+      // reliably opens in a browser tab instead of downloading. Download stays
+      // one click away inside the viewer.
+      const url = `${ctx.baseUrl}/view/${token}`;
       emit({ type: "offer", url, headline: String(input.headline ?? "Your one-pager") });
 
       // Hand the model the case-study lines so it can name a proof point out loud.
       return JSON.stringify({
         created: true,
         url,
-        tell_visitor: `Share this link: ${url}`,
+        tell_visitor: "The one-pager card is now on screen; the visitor can open it.",
         case_studies_included: caseStudies.map((c) => `${c.client_name}: ${c.result_metric}`),
       });
     }
