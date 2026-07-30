@@ -427,11 +427,18 @@ a {
   margin-top: 8px;
 }
 
-/* Inline email input the agent renders when it wants a work email. */
+/* Inline name + work-email inputs the agent renders when it wants contact details. */
 .cs-emailform {
   display: flex;
+  flex-direction: column;
   gap: 8px;
   margin-top: 8px;
+  width: 100%;
+}
+
+.cs-emailrow {
+  display: flex;
+  gap: 8px;
   width: 100%;
 }
 

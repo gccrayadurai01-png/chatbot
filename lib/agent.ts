@@ -74,9 +74,10 @@ function buildTools(serviceSlugs: string[]): Anthropic.Tool[] {
     {
       name: "request_email",
       description:
-        "Show the visitor an inline email input box for their next reply, instead of the " +
-        "normal chat box. Call this when you are asking for their work email. Keep your own " +
-        "reply to one short sentence asking for it. The email comes back as their next message.",
+        "Show the visitor an inline box that collects their NAME and WORK EMAIL, instead of the " +
+        "normal chat box. Call this when you are asking for their contact details. Keep your own " +
+        "reply to one short sentence asking for their name and work email. Their name and email " +
+        "come back as their next message — then call capture_email with both.",
       input_schema: { type: "object", properties: {}, additionalProperties: false },
     },
     {

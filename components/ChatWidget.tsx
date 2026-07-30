@@ -480,46 +480,71 @@ function TypingDots() {
   );
 }
 
-/** Inline email field the agent renders when it needs a work email. */
+/**
+ * Inline name + work-email field the agent renders when it needs contact
+ * details. Capturing the name lets the agent (and the PDF) address the visitor
+ * personally — "Thanks, Raya" lands warmer than "Thanks".
+ */
 function EmailPrompt({
   disabled,
   onSubmit,
 }: {
   disabled: boolean;
-  onSubmit: (email: string) => void;
+  onSubmit: (message: string) => void;
 }) {
-  const [value, setValue] = useState("");
-  const fieldRef = useRef<HTMLInputElement>(null);
-  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const nameRef = useRef<HTMLInputElement>(null);
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
-  // Auto-focus so it's obvious this is where the email goes — the visitor
-  // shouldn't wonder whether to type in the main box.
+  // Auto-focus so it's obvious this is where to type, not the main box.
   useEffect(() => {
-    fieldRef.current?.focus();
+    nameRef.current?.focus();
   }, []);
+
+  const submit = () => {
+    if (!emailValid || disabled) return;
+    const n = name.trim();
+    onSubmit(
+      n
+        ? `My name is ${n} and my work email is ${email.trim()}.`
+        : `My work email is ${email.trim()}.`,
+    );
+  };
 
   return (
     <form
       className="cs-emailform"
       onSubmit={(event) => {
         event.preventDefault();
-        if (valid && !disabled) onSubmit(value.trim());
+        submit();
       }}
     >
       <input
-        ref={fieldRef}
-        type="email"
+        ref={nameRef}
+        type="text"
         className="cs-emailinput"
-        value={value}
-        placeholder="you@company.com"
-        autoComplete="email"
-        inputMode="email"
+        value={name}
+        placeholder="Your name"
+        autoComplete="given-name"
         disabled={disabled}
-        onChange={(event) => setValue(event.target.value)}
+        onChange={(event) => setName(event.target.value)}
       />
-      <button type="submit" className="cs-emailsend" disabled={disabled || !valid}>
-        Send
-      </button>
+      <div className="cs-emailrow">
+        <input
+          type="email"
+          className="cs-emailinput"
+          value={email}
+          placeholder="you@company.com"
+          autoComplete="email"
+          inputMode="email"
+          disabled={disabled}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+        <button type="submit" className="cs-emailsend" disabled={disabled || !emailValid}>
+          Send
+        </button>
+      </div>
     </form>
   );
 }

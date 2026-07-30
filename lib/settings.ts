@@ -9,7 +9,7 @@ import { query } from "./db";
 export type SettingKey = "calendar_url" | "meeting_length" | "company_name";
 
 const DEFAULTS: Record<SettingKey, string> = {
-  calendar_url: process.env.CALENDAR_URL ?? "https://www.cloudsufi.com/request-demo/",
+  calendar_url: process.env.CALENDAR_URL ?? "https://calendar.app.google/RDZCa5HSWsK32KZX9",
   meeting_length: process.env.MEETING_LENGTH ?? "15 minutes",
   company_name: process.env.COMPANY_NAME ?? "CLOUDSUFI",
 };
