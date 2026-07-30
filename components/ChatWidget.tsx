@@ -12,8 +12,6 @@ type Message = {
   content: string;
   /** Tappable choices the agent offered, rendered as buttons under the bubble. */
   options?: string[];
-  /** Set when the agent asked for an email — renders an inline email input. */
-  emailPrompt?: boolean;
   /** Attached cards, rendered under the bubble. */
   offer?: { url: string; headline: string };
   meeting?: { url: string; length: string };
@@ -47,6 +45,16 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
 
+  // Persistent contact bar pinned at the top. The visitor can fill name + work
+  // email any time; once saved we send it with every message so the agent never
+  // asks again — it just uses their first name. Restored from localStorage.
+  const [lead, setLead] = useState<{ name: string; email: string } | null>(null);
+  const [leadName, setLeadName] = useState("");
+  const [leadEmail, setLeadEmail] = useState("");
+  const [leadEditing, setLeadEditing] = useState(true);
+  const [leadPulse, setLeadPulse] = useState(false);
+  const leadNameRef = useRef<HTMLInputElement>(null);
+
   // Service picker: real backend catalog, so admin edits show up with no
   // redeploy. `pickedService` drives a second level of chips (its products)
   // when it has any, matching "click a service, see its products."
@@ -62,6 +70,47 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  // Latest lead, so the send callback (which doesn't depend on it) always posts
+  // the current value.
+  const leadRef = useRef<{ name: string; email: string } | null>(lead);
+  useEffect(() => {
+    leadRef.current = lead;
+  }, [lead]);
+
+  // Restore a previously saved contact so returning visitors aren't asked again.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("cloudsufi_lead");
+      if (raw) {
+        const saved = JSON.parse(raw) as { name?: string; email?: string };
+        if (saved.email) {
+          const restored = { name: saved.name ?? "", email: saved.email };
+          setLead(restored);
+          setLeadName(restored.name);
+          setLeadEmail(restored.email);
+          setLeadEditing(false);
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(leadEmail.trim());
+
+  const saveLead = useCallback(() => {
+    if (!emailValid) return;
+    const next = { name: leadName.trim(), email: leadEmail.trim() };
+    setLead(next);
+    setLeadEditing(false);
+    setLeadPulse(false);
+    try {
+      localStorage.setItem("cloudsufi_lead", JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+  }, [emailValid, leadName, leadEmail]);
 
   const visitorId = useRef<string | null>(null);
   if (visitorId.current === null && typeof window !== "undefined") {
@@ -144,7 +193,12 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
         fetch("/api/chat/message", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId: id, message: trimmed, history: priorHistory }),
+          body: JSON.stringify({
+            sessionId: id,
+            message: trimmed,
+            history: priorHistory,
+            lead: leadRef.current ?? undefined,
+          }),
         });
 
       try {
@@ -207,7 +261,13 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
                 patch((m) => ({ ...m, options: event.options }));
                 break;
               case "email_prompt":
-                patch((m) => ({ ...m, emailPrompt: true }));
+                // If they've already given contact details up top, don't nag —
+                // the agent shouldn't be asking, but ignore gracefully if it does.
+                if (!leadRef.current) {
+                  setLeadEditing(true);
+                  setLeadPulse(true);
+                  leadNameRef.current?.focus();
+                }
                 break;
               case "offer":
                 patch((m) => ({ ...m, offer: { url: event.url, headline: event.headline } }));
@@ -259,15 +319,6 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
     [send],
   );
 
-  /** Submitting the inline email box sends the address and retires the box. */
-  const submitEmailPrompt = useCallback(
-    (messageId: number, email: string) => {
-      setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, emailPrompt: false } : m)));
-      void send(email);
-    },
-    [send],
-  );
-
   const disabled = streaming || !sessionId;
   const showPicker = messages.length === 1 && !streaming;
 
@@ -308,6 +359,53 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
         </div>
       </header>
 
+      {lead && !leadEditing ? (
+        <div className="cs-leadbar cs-leadbar-saved">
+          <span className="cs-leadbar-check">✓</span>
+          <span className="cs-leadbar-who">
+            {lead.name ? `${lead.name} · ` : ""}
+            {lead.email}
+          </span>
+          <button
+            className="cs-leadbar-edit"
+            onClick={() => setLeadEditing(true)}
+            aria-label="Edit your details"
+          >
+            Edit
+          </button>
+        </div>
+      ) : (
+        <form
+          className={`cs-leadbar${leadPulse ? " cs-leadbar-pulse" : ""}`}
+          onSubmit={(event) => {
+            event.preventDefault();
+            saveLead();
+          }}
+        >
+          <input
+            ref={leadNameRef}
+            type="text"
+            className="cs-leadinput"
+            value={leadName}
+            placeholder="Your name"
+            autoComplete="given-name"
+            onChange={(event) => setLeadName(event.target.value)}
+          />
+          <input
+            type="email"
+            className="cs-leadinput"
+            value={leadEmail}
+            placeholder="Work email"
+            autoComplete="email"
+            inputMode="email"
+            onChange={(event) => setLeadEmail(event.target.value)}
+          />
+          <button type="submit" className="cs-leadsave" disabled={!emailValid}>
+            Save
+          </button>
+        </form>
+      )}
+
       <div className="cs-messages" ref={scrollRef}>
         {messages.map((message) => (
           <div key={message.id} className={`cs-row cs-row-${message.role}`}>
@@ -335,13 +433,6 @@ export default function ChatWidget({ startOpen = true }: { startOpen?: boolean }
                     </button>
                   ))}
                 </div>
-              )}
-
-              {message.emailPrompt && (
-                <EmailPrompt
-                  disabled={disabled}
-                  onSubmit={(email) => submitEmailPrompt(message.id, email)}
-                />
               )}
 
               {message.emailRejected && (
@@ -494,71 +585,3 @@ function TypingDots() {
   );
 }
 
-/**
- * Inline name + work-email field the agent renders when it needs contact
- * details. Capturing the name lets the agent (and the PDF) address the visitor
- * personally — "Thanks, Raya" lands warmer than "Thanks".
- */
-function EmailPrompt({
-  disabled,
-  onSubmit,
-}: {
-  disabled: boolean;
-  onSubmit: (message: string) => void;
-}) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const nameRef = useRef<HTMLInputElement>(null);
-  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-
-  // Auto-focus so it's obvious this is where to type, not the main box.
-  useEffect(() => {
-    nameRef.current?.focus();
-  }, []);
-
-  const submit = () => {
-    if (!emailValid || disabled) return;
-    const n = name.trim();
-    onSubmit(
-      n
-        ? `My name is ${n} and my work email is ${email.trim()}.`
-        : `My work email is ${email.trim()}.`,
-    );
-  };
-
-  return (
-    <form
-      className="cs-emailform"
-      onSubmit={(event) => {
-        event.preventDefault();
-        submit();
-      }}
-    >
-      <input
-        ref={nameRef}
-        type="text"
-        className="cs-emailinput"
-        value={name}
-        placeholder="Your name"
-        autoComplete="given-name"
-        disabled={disabled}
-        onChange={(event) => setName(event.target.value)}
-      />
-      <div className="cs-emailrow">
-        <input
-          type="email"
-          className="cs-emailinput"
-          value={email}
-          placeholder="you@company.com"
-          autoComplete="email"
-          inputMode="email"
-          disabled={disabled}
-          onChange={(event) => setEmail(event.target.value)}
-        />
-        <button type="submit" className="cs-emailsend" disabled={disabled || !emailValid}>
-          Send
-        </button>
-      </div>
-    </form>
-  );
-}

@@ -427,6 +427,87 @@ a {
   margin-top: 8px;
 }
 
+/* Persistent contact bar pinned under the header. */
+.cs-leadbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--cs-border);
+  background: #f8fafc;
+}
+
+.cs-leadinput {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13.5px;
+  outline: none;
+}
+
+.cs-leadinput:focus {
+  border-color: var(--cs-blue);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.cs-leadsave {
+  flex: 0 0 auto;
+  padding: 7px 14px;
+  border: none;
+  border-radius: 8px;
+  background: var(--cs-blue);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cs-leadsave:hover:not(:disabled) {
+  background: var(--cs-blue-dark);
+}
+
+.cs-leadbar-saved {
+  font-size: 13px;
+  color: var(--cs-muted);
+}
+
+.cs-leadbar-check {
+  color: #047857;
+  font-weight: 700;
+}
+
+.cs-leadbar-who {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cs-text);
+}
+
+.cs-leadbar-edit {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  color: var(--cs-blue);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Pulse to draw the eye when the agent needs their details. */
+.cs-leadbar-pulse {
+  animation: cs-pulse 1s ease-in-out 3;
+}
+
+@keyframes cs-pulse {
+  0%, 100% { background: #f8fafc; }
+  50% { background: #dbeafe; }
+}
+
 /* Inline name + work-email inputs the agent renders when it wants contact details. */
 .cs-emailform {
   display: flex;

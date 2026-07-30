@@ -35,17 +35,40 @@ export async function POST(request: Request) {
   let sessionId: string;
   let message: string;
   let clientHistory: ChatTurn[] = [];
+  let leadContext = "";
   try {
     const body = (await request.json()) as {
       sessionId?: unknown;
       message?: unknown;
       history?: unknown;
+      lead?: unknown;
     };
     if (typeof body.sessionId !== "string" || typeof body.message !== "string") {
       return Response.json({ error: "sessionId and message are required" }, { status: 400 });
     }
     sessionId = body.sessionId;
     message = body.message.trim();
+
+    // The persistent contact bar sends the visitor's name + work email once they
+    // fill it. Surface it to the agent as context so it addresses them by name
+    // and NEVER asks for the email again.
+    const rawLead = body.lead;
+    if (
+      rawLead &&
+      typeof rawLead === "object" &&
+      typeof (rawLead as { email?: unknown }).email === "string" &&
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((rawLead as { email: string }).email)
+    ) {
+      const email = (rawLead as { email: string }).email.trim().slice(0, 200);
+      const name =
+        typeof (rawLead as { name?: unknown }).name === "string"
+          ? (rawLead as { name: string }).name.trim().slice(0, 100)
+          : "";
+      leadContext =
+        `(Contact already provided via the form: ${name ? `name ${name}, ` : ""}work email ${email}. ` +
+        `Do NOT ask for their name or email again — address them by first name. When it's time to ` +
+        `send the one-pager, call capture_email with this email.)`;
+    }
 
     // The conversation is STATELESS: the widget sends the prior turns with every
     // message, so any serverless instance can answer without a shared session
@@ -81,6 +104,12 @@ export async function POST(request: Request) {
   const combined: ChatTurn[] = [...clientHistory, { role: "user", content: message }];
   // The model requires the first turn to be from the user.
   while (combined.length > 1 && combined[0]!.role === "assistant") combined.shift();
+  // Fold the contact-bar context into the latest user turn so the agent always
+  // sees it, without breaking the user/assistant alternation.
+  if (leadContext) {
+    const last = combined[combined.length - 1]!;
+    combined[combined.length - 1] = { ...last, content: `${leadContext}\n\n${last.content}` };
+  }
   const history = combined;
 
   // Best-effort persistence for the admin dashboard when a database is present;
